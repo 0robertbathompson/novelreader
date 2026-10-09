@@ -75,15 +75,192 @@ document.addEventListener('drop', e => {
 });
 
 async function readFile(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.epub')) {
+    await readEpub(file);
+    return;
+  }
   const buf = await file.arrayBuffer();
   let text = tryDecode(buf);
   // 去掉竖排常见的全角空格堆积，统一换行
   text = text.replace(/\r/g, '\n');
+  // 如果用户直接导入了 epub 解包后的单页 xhtml，也做一次去标签
+  if (name.endsWith('.html') || name.endsWith('.htm') || name.endsWith('.xhtml')) {
+    text = htmlToText(text, false);
+  }
   loadBook(file.name.replace(/\.[^.]+$/, ''), text);
 }
 function tryDecode(buf) {
   try { return new TextDecoder('utf-8', { fatal: true }).decode(buf); }
   catch { try { return new TextDecoder('gbk').decode(buf); } catch { return new TextDecoder().decode(buf); } }
+}
+
+// ---------- EPUB 解析（竖排 vertical-rl 自动转横版） ----------
+// 你的信长那本就是标准 EPUB3：opf + spine + xhtml，CSS 里 writing-mode: vertical-rl。
+// 这里解包后只取文字、丢掉竖排版式和注音 rt，自然就是横版。
+let lastEpubFile = null;
+async function readEpub(file) {
+  lastEpubFile = file;
+  if (typeof JSZip === 'undefined') {
+    alert('EPUB 解析库(JSZip)没加载出来，请联网后刷新页面再导入（CDN 被拦就会这样）。');
+    return;
+  }
+  $('chapterTitle').textContent = '正在解析 EPUB…';
+  try {
+    const zip = await JSZip.loadAsync(file);
+    const getFile = (p) => zip.file(p) || zip.file(decodeURIComponent(p));
+    // 1. container.xml 找 opf
+    let opfPath = 'content.opf';
+    const containerFile = getFile('META-INF/container.xml');
+    if (containerFile) {
+      const xml = await containerFile.async('string');
+      const m = xml.match(/full-path="([^"]+\.opf)"/);
+      if (m) opfPath = m[1];
+    }
+    const opfFile = getFile(opfPath);
+    if (!opfFile) throw new Error('找不到 ' + opfPath);
+    const opfText = await opfFile.async('string');
+    const opfDir = opfPath.includes('/') ? opfPath.slice(0, opfPath.lastIndexOf('/') + 1) : '';
+    // 用正则解析 OPF（带命名空间的 XML 用 querySelector 容易取不到，已实测）
+    const titleM = opfText.match(/<dc:title[^>]*>([^<]+)<\/dc:title>/i);
+    const bookTitle = ((titleM ? titleM[1] : file.name.replace(/\.epub$/i, '')) || '').trim();
+    const manifest = {};
+    for (const m of opfText.matchAll(/<item\b[^>]*>/gi)) {
+      const tag = m[0];
+      const id = (tag.match(/\bid="([^"]+)"/) || [])[1];
+      const href = (tag.match(/\bhref="([^"]+)"/) || [])[1];
+      if (id && href) manifest[id] = href;
+    }
+    const spineSec = (opfText.match(/<spine\b[\s\S]*?<\/spine>/i) || [''])[0];
+    const spine = [...spineSec.matchAll(/\bidref="([^"]+)"/gi)].map(m => m[1]);
+    // toc: nav.xhtml 或 ncx，先建 href->标题 映射（日文书的目次就靠这个）
+    const tocMap = {};
+    try { await buildTocMap(zip, opfText, opfDir, tocMap); } catch (e) {}
+
+    const keepRuby = $('keepRuby')?.checked;
+    const structured = [];
+    for (const idref of spine) {
+      const href = manifest[idref];
+      if (!href) continue;
+      if (!/\.(html?|xhtml)$/i.test(href.split('#')[0])) continue; // 跳过图片/封面
+      const full = opfDir + href.split('#')[0];
+      const f = getFile(full);
+      if (!f) continue;
+      const html = await f.async('string');
+      const { title, paras } = xhtmlToChapter(html, keepRuby);
+      if (!paras.length) continue; // 纯图片封面页直接跳过
+      // 过滤纯版权页噪音（calibre 提示页只有一句话也保留，不影响）
+      const tocTitle = tocMap[href.split('#')[0]] || tocMap[full] || tocMap[href.split('/').pop()];
+      structured.push({ title: tocTitle || title || href.split('/').pop(), content: paras });
+    }
+    if (!structured.length) throw new Error('EPUB 里没读到正文');
+    loadStructuredBook(bookTitle, structured);
+  } catch (err) {
+    console.error(err);
+    alert('这个 EPUB 解析失败：' + err.message);
+    $('chapterTitle').textContent = 'EPUB 解析失败';
+  }
+}
+
+async function buildTocMap(zip, opfText, opfDir, tocMap) {
+  const getFile = (p) => zip.file(p) || zip.file(decodeURIComponent(p));
+  // EPUB3 nav：找 properties 含 nav 的 item
+  let navHref = null;
+  for (const m of opfText.matchAll(/<item\b[^>]*>/gi)) {
+    const tag = m[0];
+    if (/properties="[^"]*\bnav\b/.test(tag)) {
+      navHref = (tag.match(/\bhref="([^"]+)"/) || [])[1];
+      if (navHref) break;
+    }
+  }
+  if (navHref) {
+    const f = getFile(opfDir + navHref);
+    if (f) {
+      const html = await f.async('string');
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      doc.querySelectorAll('a[href]').forEach(a => {
+        const h = a.getAttribute('href').split('#')[0];
+        const t = a.textContent.trim();
+        if (h && t && !tocMap[h]) tocMap[h] = t;
+      });
+      return;
+    }
+  }
+  // EPUB2 ncx
+  let ncxHref = null;
+  for (const m of opfText.matchAll(/<item\b[^>]*>/gi)) {
+    const tag = m[0];
+    if (/media-type="[^"]*ncx/.test(tag)) {
+      ncxHref = (tag.match(/\bhref="([^"]+)"/) || [])[1];
+      if (ncxHref) break;
+    }
+  }
+  if (ncxHref) {
+    const f = getFile(opfDir + ncxHref);
+    if (f) {
+      const xml = await f.async('string');
+      const doc = new DOMParser().parseFromString(xml, 'application/xml');
+      doc.querySelectorAll('navPoint').forEach(np => {
+        const label = np.querySelector('navLabel text')?.textContent?.trim();
+        const src = np.querySelector('content')?.getAttribute('src')?.split('#')[0];
+        if (label && src && !tocMap[src]) tocMap[src] = label;
+      });
+    }
+  }
+}
+
+// 单页 xhtml -> {title, paras}：去竖排样式、去注音 rt、按 p/h/br 分段
+function xhtmlToChapter(html, keepRuby) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('script,style').forEach(n => n.remove());
+  const body = doc.body || doc;
+  // 标题优先 h1/h2/h3，否则 title
+  const h = body.querySelector('h1,h2,h3');
+  const title = (h?.textContent || doc.querySelector('title')?.textContent || '').replace(/\s+/g, ' ').trim();
+  const paras = [];
+  // 按块级元素切段：p/div/h/li 转一行，br 转行
+  const blocks = body.querySelectorAll('p,div,h1,h2,h3,h4,li,blockquote');
+  const push = (s) => { s = (s || '').replace(/\s+/g, ' ').trim(); if (s) paras.push(s); };
+  if (blocks.length) {
+    blocks.forEach(b => push(rubyToText(b, keepRuby)));
+  } else {
+    body.innerHTML.split(/<br\s*\/?>/i).forEach(part => {
+      push(rubyToText(htmlToDom(part), keepRuby));
+    });
+  }
+  // 标题在正文里重复出现就去掉第一段（日文书常见：标题 span 后面跟正文）
+  if (title && paras.length && paras[0] === title) paras.shift();
+  return { title, paras };
+}
+
+function rubyToText(node, keepRuby) {
+  const clone = node.cloneNode(true);
+  clone.querySelectorAll('rt,rp').forEach(n => {
+    if (keepRuby && n.tagName.toLowerCase() === 'rt') {
+      n.replaceWith(document.createTextNode('（' + n.textContent + '）'));
+    } else n.remove();
+  });
+  // ruby 剩下的 rb 自然就是汉字正文
+  return clone.textContent || '';
+}
+function htmlToDom(html) {
+  const d = document.createElement('div');
+  d.innerHTML = html;
+  return d;
+}
+function htmlToText(html, keepRuby) {
+  const { paras } = xhtmlToChapter(html, keepRuby);
+  return paras.join('\n');
+}
+
+function loadStructuredBook(title, list) {
+  backupRaw = list.map(c => c.title + '\n' + c.content.join('\n')).join('\n\n');
+  $('undoFixBtn').disabled = true;
+  chapters = list;
+  current = 0;
+  $('bookTitle').textContent = title;
+  $('bookTitleSide').textContent = title;
+  renderToc(''); renderChapter();
 }
 
 // ---------- 章节切分（网文站目录风） ----------
@@ -152,6 +329,9 @@ $('undoFixBtn').addEventListener('click', () => {
   if (!backupRaw) return;
   loadBook($('bookTitle').textContent.replace('（横版）', ''), backupRaw);
   $('undoFixBtn').disabled = true;
+});
+$('keepRuby')?.addEventListener('change', () => {
+  if (lastEpubFile) readEpub(lastEpubFile); // 切换注音显示就按新方式重解一次
 });
 
 // ---------- 渲染 ----------

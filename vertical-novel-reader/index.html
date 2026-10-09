@@ -5,20 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>横竖小说阅读器 · 竖版转横版</title>
 <link rel="stylesheet" href="style.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
 <header class="topbar">
   <div class="topbar-inner">
     <div class="logo">📖 横竖<span>小说</span></div>
     <div class="top-actions">
-      <label class="btn primary" for="fileInput">导入小说 (.txt/.md/.html)</label>
-      <input id="fileInput" type="file" accept=".txt,.md,.markdown,.html,.htm" hidden />
+      <label class="btn primary" for="fileInput">导入小说 (.txt/.epub/.md/.html)</label>
+      <input id="fileInput" type="file" accept=".txt,.md,.markdown,.html,.htm,.epub,.xhtml" hidden />
       <button class="btn" id="sampleBtn">载入示例</button>
       <button class="btn" id="exportBtn">导出横版 TXT</button>
       <button class="btn ghost" id="tocToggle">目录</button>
     </div>
   </div>
-  <div class="drop-tip" id="dropTip">把小说文件拖到页面任意处即可导入 · 自动竖版转横版</div>
+  <div class="drop-tip" id="dropTip">把小说文件拖到页面任意处即可导入 · txt / epub 自动竖版转横版（EPUB 需联网加载解析库）</div>
 </header>
 
 <div class="layout">
@@ -44,13 +45,16 @@
     </div>
 
     <div class="convert-bar">
-      <span>如果导入的是从竖排 PDF 复制出来的乱序文字（每行只有几个字、要横着连起来读）：</span>
+      <span>EPUB 注音（振假名）：</span>
+      <label style="font-size:13px"><input type="checkbox" id="keepRuby" /> 保留为 汉字（假名）</label>
+      <span style="flex-basis:100%;height:0"></span>
+      <span>从竖排 PDF 复制出的乱序文字（每行几个字、要横着连读）：</span>
       <button class="btn small" id="fixVerticalBtn">一键竖版重排 → 横版</button>
       <button class="btn small ghost" id="undoFixBtn" disabled>撤销重排</button>
     </div>
 
     <article id="reader" class="reader horizontal">
-      <p class="placeholder">使用说明：<br/>1. 点击左上「导入小说」选择竖版/横版 txt。<br/>2. 本站默认以<strong>横版（从左到右）</strong>显示，自动把竖排版式转成横排。<br/>3. 右侧面板可调背景、字色、字号、行高、字体，还能贴字体链接导入新字体。<br/>4. 右下角可上一章 / 下一章，左侧是仿起点网文目录。</p>
+      <p class="placeholder">使用说明：<br/>1. 点击左上「导入小说」选择 txt / epub（你那本信长日文书就是标准竖排 EPUB，直接导）。<br/>2. 本站默认以<strong>横版（从左到右）</strong>显示，自动去掉竖排版式、注音只留汉字正文。<br/>3. 右侧面板可调背景、字色、字号、行高、字体，还能贴字体链接导入新字体。<br/>4. 右下角可上一章 / 下一章，左侧是仿起点网文目录。</p>
     </article>
 
     <div class="pager">

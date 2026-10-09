@@ -4,7 +4,8 @@
 纯静态三件套 `index.html / style.css / app.js`，无需后端，直接用 GitHub Pages 就能给别人用。
 
 ## 功能
-- 导入 `.txt / .md / .html`（拖拽或点按钮，自动兼容 UTF-8 / GBK）
+- 导入 `.txt / .md / .html / .epub`（拖拽或点按钮，txt 自动兼容 UTF-8 / GBK）
+- EPUB（含日文竖排书）按 spine 顺序解包，只取文字丢掉 `vertical-rl` 版式，自然变横版；`ruby/rt` 注音默认只留汉字，可勾选保留为 汉字（假名）
 - 默认**横版**显示，右上可一键切换**竖版预览**（writing-mode）
 - 自动切章节 + 左侧网文式目录 + 搜索 + 上/下一章
 - **一键竖版重排**：从竖排 PDF 复制出的乱序文字（每行几个字、要横着连读）可按列转置还原成横版，可撤销
@@ -23,6 +24,7 @@ python -m http.server 8000
 # 浏览器打开 http://localhost:8000
 ```
 直接双击 `index.html` 也能用（推荐用上面 http 方式，字体外链更稳）。
+> EPUB 解析依赖 JSZip CDN，离线双击打开时需联网一次；传到 GitHub Pages 上用没问题。
 
 ## 自定义字体举例
 1. Google Fonts CSS：
