@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>横竖小说阅读器 · 竖版转横版</title>
+<link rel="stylesheet" href="style.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="logo">📖 横竖<span>小说</span></div>
+    <div class="top-actions">
+      <label class="btn primary" for="fileInput">导入小说 (.txt/.epub/.md/.html)</label>
+      <input id="fileInput" type="file" accept=".txt,.md,.markdown,.html,.htm,.epub,.xhtml" hidden />
+      <button class="btn" id="sampleBtn">载入示例</button>
+      <button class="btn" id="exportBtn">导出横版 TXT</button>
+      <button class="btn ghost" id="tocToggle">目录</button>
+    </div>
+  </div>
+  <div class="drop-tip" id="dropTip">把小说文件拖到页面任意处即可导入 · txt / epub 自动竖版转横版（EPUB 需联网加载解析库）</div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="side-head">
+      <strong id="bookTitleSide">未载入书籍</strong>
+      <span id="chapterCount">0 章</span>
+    </div>
+    <input id="searchToc" placeholder="搜索章节…" />
+    <div class="toc" id="toc"></div>
+  </aside>
+
+  <main class="main">
+    <div class="reader-toolbar">
+      <div>
+        <h1 id="bookTitle">竖版小说 → 横版阅读</h1>
+        <h2 id="chapterTitle">先导入文件，或点“载入示例”试试</h2>
+      </div>
+      <div class="layout-switch">
+        <button id="modeH" class="seg active">横版 · 正常</button>
+        <button id="modeV" class="seg">竖版 · 预览</button>
+      </div>
+    </div>
+
+    <div class="convert-bar">
+      <span>EPUB 注音（振假名）：</span>
+      <label style="font-size:13px"><input type="checkbox" id="keepRuby" /> 保留为 汉字（假名）</label>
+      <span style="flex-basis:100%;height:0"></span>
+      <span>从竖排 PDF 复制出的乱序文字（每行几个字、要横着连读）：</span>
+      <button class="btn small" id="fixVerticalBtn">一键竖版重排 → 横版</button>
+      <button class="btn small ghost" id="undoFixBtn" disabled>撤销重排</button>
+    </div>
+
+    <article id="reader" class="reader horizontal">
+      <p class="placeholder">使用说明：<br/>1. 点击左上「导入小说」选择 txt / epub（你那本信长日文书就是标准竖排 EPUB，直接导）。<br/>2. 本站默认以<strong>横版（从左到右）</strong>显示，自动去掉竖排版式、注音只留汉字正文。<br/>3. 右侧面板可调背景、字色、字号、行高、字体，还能贴字体链接导入新字体。<br/>4. 右下角可上一章 / 下一章，左侧是仿起点网文目录。</p>
+    </article>
+
+    <div class="pager">
+      <button class="btn" id="prevBtn">← 上一章</button>
+      <span id="pageInfo">-</span>
+      <button class="btn" id="nextBtn">下一章 →</button>
+    </div>
+  </main>
+
+  <aside class="settings">
+    <h3>🎨 阅读样式</h3>
+
+    <div class="group">
+      <label>版式方向</label>
+      <div class="row">
+        <button class="seg small active" id="modeH2">横版</button>
+        <button class="seg small" id="modeV2">竖版</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <label>预设主题（网文站风）</label>
+      <div class="themes">
+        <button data-theme="qidian" class="theme-dot" style="background:#f6f1e7" title="起点米黄"></button>
+        <button data-theme="white" class="theme-dot" style="background:#ffffff" title="纯白"></button>
+        <button data-theme="green" class="theme-dot" style="background:#e8f5e9" title="护眼绿"></button>
+        <button data-theme="dark" class="theme-dot" style="background:#1a1a1a" title="夜间"></button>
+        <button data-theme="pink" class="theme-dot" style="background:#fdf0f3" title="粉"></button>
+      </div>
+    </div>
+
+    <div class="group">
+      <label>背景颜色 <input type="color" id="bgColor" value="#f6f1e7" /></label>
+      <label>文字颜色 <input type="color" id="textColor" value="#333333" /></label>
+    </div>
+
+    <div class="group">
+      <label>字体大小 <span id="fontSizeVal">20px</span></label>
+      <input type="range" id="fontSize" min="12" max="34" value="20" />
+      <label>行高 <span id="lineHeightVal">2.0</span></label>
+      <input type="range" id="lineHeight" min="1.2" max="3" step="0.1" value="2" />
+      <label>内容宽度 <span id="widthVal">800px</span></label>
+      <input type="range" id="contentWidth" min="480" max="1100" step="20" value="800" />
+    </div>
+
+    <div class="group">
+      <label>字体</label>
+      <select id="fontFamily">
+        <option value="'Noto Serif SC','Songti SC',serif">宋体 / 思源宋体（网文默认）</option>
+        <option value="'Microsoft YaHei','PingFang SC',sans-serif">黑体 / 雅黑</option>
+        <option value="'KaiTi','Kaiti SC',serif">楷体</option>
+        <option value="'SimSun',serif">仿宋</option>
+        <option value="custom">自定义（下方导入链接后用）</option>
+      </select>
+    </div>
+
+    <div class="group">
+      <label>自定义字体（粘贴字体链接）</label>
+      <input id="fontUrl" placeholder="https:// fonts css 或 .woff2/.ttf 直链" />
+      <input id="fontName" placeholder="字体名，如 ZCOOL / MyFont" />
+      <div class="row">
+        <button class="btn small primary" id="loadFontBtn">导入字体</button>
+        <button class="btn small ghost" id="clearFontBtn">清除</button>
+      </div>
+      <p class="hint">支持两种：① Google Fonts / 字体 CSS 链接（如 https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei ）② 字体文件直链（.woff2/.woff/.ttf/.otf）。填好字体名后在上面选“自定义”即可生效。</p>
+      <p class="hint" id="fontStatus"></p>
+    </div>
+
+    <div class="group">
+      <button class="btn small ghost" id="resetBtn">恢复默认样式</button>
+    </div>
+  </aside>
+</div>
+
+<button class="fab-toc" id="fabToc">目录</button>
+
+<script src="app.js"></script>
+</body>
+</html>
